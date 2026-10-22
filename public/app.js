@@ -12,29 +12,58 @@
   const userCount = document.getElementById('userCount');
   const connectionText = document.getElementById('connectionText');
   let myName = '';
+  let requestedName = '';
 
-  socket.on('connect', () => { connectionText.textContent = 'متصل به سرور'; });
-  socket.on('disconnect', () => { connectionText.textContent = 'ارتباط قطع شد'; });
+  socket.on('connect', () => {
+    connectionText.textContent = 'متصل به سرور';
+    // When the network reconnects, restore the user's room membership.
+    if (requestedName) join(requestedName, true);
+  });
+
+  socket.on('disconnect', () => {
+    connectionText.textContent = 'ارتباط قطع شد؛ تلاش برای اتصال مجدد…';
+  });
+
+  socket.on('connect_error', () => {
+    connectionText.textContent = 'اتصال برقرار نشد؛ در حال تلاش مجدد…';
+  });
 
   loginForm.addEventListener('submit', (event) => {
     event.preventDefault();
+    if (!socket.connected) {
+      loginError.textContent = 'اتصال به سرور برقرار نیست؛ چند لحظه صبر کن.';
+      return;
+    }
     const name = usernameInput.value.trim();
+    requestedName = name;
+    join(name, false);
+  });
+
+  function join(name, isReconnect) {
     socket.emit('user:join', name, (result) => {
       if (!result?.ok) {
-        loginError.textContent = result?.error || 'ورود انجام نشد. دوباره تلاش کن.';
+        if (!isReconnect) {
+          requestedName = '';
+          loginError.textContent = result?.error || 'ورود انجام نشد. دوباره تلاش کن.';
+        }
         return;
       }
       myName = result.name;
+      loginError.textContent = '';
       loginPanel.hidden = true;
       chatPanel.hidden = false;
-      messageInput.focus();
+      if (!isReconnect) messageInput.focus();
     });
-  });
+  }
 
   messageForm.addEventListener('submit', (event) => {
     event.preventDefault();
     const text = messageInput.value.trim();
     if (!text) return;
+    if (!socket.connected) {
+      connectionText.textContent = 'اتصال قطع است؛ پیام هنوز ارسال نشده.';
+      return;
+    }
     socket.emit('chat:send', text);
     messageInput.value = '';
     messageInput.focus();
@@ -60,8 +89,14 @@
     items.forEach(renderMessage);
     scrollToBottom();
   });
+
   socket.on('chat:message', (message) => {
     renderMessage(message);
+    scrollToBottom();
+  });
+
+  socket.on('chat:error', (text) => {
+    renderMessage({ type: 'system', text, time: new Date().toISOString() });
     scrollToBottom();
   });
 
